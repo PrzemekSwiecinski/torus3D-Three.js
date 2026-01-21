@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <title>Torus 3D</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #3a3a3a; }
+        
+        #log {
+            position: absolute;
+            top: 10px; left: 10px;
+            color: #00ff00; 
+            font-family: monospace; 
+            font-size: 14px;
+            pointer-events: none;
+            white-space: pre;
+            text-shadow: 1px 1px 2px black;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div id="log">Kalibracja obrotów...</div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { FontLoader } from 'three/addons/loaders/FontLoader.js';
+        import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
+        import { ParametricGeometry } from 'three/addons/geometries/ParametricGeometry.js';
+
+        const R_MAJOR = 4.0; 
+        const R_MINOR = 1.5; 
+
+        const torusFunction = (u, v, target) => {
+            const U = u * Math.PI * 2; 
+            const V = v * Math.PI * 2; 
+            
+            const x = (R_MAJOR + R_MINOR * Math.cos(V)) * Math.cos(U);
+            const z = (R_MAJOR + R_MINOR * Math.cos(V)) * Math.sin(U);
+            const y = R_MINOR * Math.sin(V);
+            
+            target.set(x, y, z);
+        };
+
+        function createTireTexture() {
+            const size = 1024; 
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+
+            ctx.fillStyle = '#050505'; 
+            ctx.fillRect(0, 0, size, size);
+
+            ctx.fillStyle = '#202020'; 
+            
+            const numberOfStripes = 12;
+            const segmentWidth = size / numberOfStripes;
+            const stripeWidth = segmentWidth * 0.05;
+
+            for(let i=0; i < numberOfStripes; i++) {
+                const x = i * segmentWidth;
+                ctx.fillRect(x, 0, stripeWidth, size);
+            }
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(1, 1); 
+            texture.anisotropy = 16; 
+            return texture;
+        }
+
+        const scene = new THREE.Scene();
+        const grayColor = 0x3a3a3a;
+        scene.background = new THREE.Color(grayColor); 
+        scene.fog = new THREE.FogExp2(grayColor, 0.02);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 12, 8); 
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true }); 
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.0;
+        document.body.appendChild(renderer.domElement);
+        
+        const controls = new OrbitControls(camera, renderer.domElement);
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+        
+        const mainLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        mainLight.position.set(5, 10, 5);
+        scene.add(mainLight);
+        
+        const rimLight = new THREE.SpotLight(0xffffff, 4.0); 
+        rimLight.position.set(0, 5, -10); 
+        rimLight.lookAt(0, 0, 0);
+        scene.add(rimLight);
+
+        const geometry = new ParametricGeometry(torusFunction, 120, 60);
+        const tireMap = createTireTexture();
+        
+        const material = new THREE.MeshPhysicalMaterial({ 
+            map: tireMap, 
+            color: 0x888888,        
+            metalness: 0.1,         
+            roughness: 0.7,         
+            clearcoat: 0.1,         
+            clearcoatRoughness: 0.5,
+            side: THREE.DoubleSide
+        });
+        
+        const donut = new THREE.Mesh(geometry, material);
+        scene.add(donut);
+
+        const textToDisplay = "ZAAWANSOWANE ALGORYTMY";
+        const angleStep = 0.25;
+        
+        const r_text = R_MINOR + 0.02; 
+        
+        const r_outer = R_MAJOR + r_text; 
+
+        const letters = [];
+
+        const loader = new FontLoader();
+        loader.load('https://unpkg.com/three@0.160.0/examples/fonts/helvetiker_bold.typeface.json', function (font) {
+            
+            const centerIndex = (textToDisplay.length - 1) / 2;
+
+            for (let i = 0; i < textToDisplay.length; i++) {
+                const char = textToDisplay[i];
+                const textGeo = new TextGeometry(char, {
+                    font: font,
+                    size: 0.8,      
+                    height: 0.05, 
+                    curveSegments: 5,
+                });
+                
+                textGeo.center();
+
+                const textMat = new THREE.MeshStandardMaterial({ 
+                    color: 0xffdd00, 
+                    emissive: 0x886600, 
+                    roughness: 0.4
+                });
+                const letterMesh = new THREE.Mesh(textGeo, textMat);
+
+                const u_offset = (centerIndex - i) * angleStep;
+                
+                letterMesh.userData = {
+                    uOffset: u_offset,
+                    name: char 
+                };
+
+                scene.add(letterMesh);
+                letters.push(letterMesh);
+            }
+        });
+
+        const logDiv = document.getElementById('log');
+        
+        const ROTATION_SPEED = 0.015;
+
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            donut.rotation.y -= ROTATION_SPEED; 
+
+            if (letters.length > 0) {
+                letters.forEach(mesh => {
+                    const u_final = mesh.userData.uOffset - donut.rotation.y; 
+                    
+                    const v = Math.PI / 2; 
+                    
+                    const x = (R_MAJOR + r_text * Math.cos(v)) * Math.cos(u_final);
+                    const z = (R_MAJOR + r_text * Math.cos(v)) * Math.sin(u_final);
+                    const y = r_text * Math.sin(v);
+
+                    mesh.position.set(x, y, z);
+
+                    mesh.rotation.set(0, 0, 0);
+                    mesh.lookAt(0, y, 0);
+                    mesh.rotateX(-Math.PI / 2);
+                    mesh.rotateZ(Math.PI);
+                });
+
+                const totalRotation = Math.abs(donut.rotation.y);
+                
+                const degrees = (totalRotation * 180 / Math.PI) % 360;
+
+                const revs = Math.floor(totalRotation / (Math.PI * 2));
+
+                const estRPM = (ROTATION_SPEED * 60 * 60) / (Math.PI * 2);
+
+                const omega = ROTATION_SPEED * 60;
+                const velocity = omega * r_outer; 
+
+                const sampleLetter = letters[Math.floor(letters.length/2)];
+
+                logDiv.innerText = 
+                    `PARAMETERS (Parametry)\n` +
+                    `---------------------\n` +
+                    `Angle (deg) : ${degrees.toFixed(1)}°\n` +
+                    `Total Revs  : ${revs}\n` +
+                    `Speed (RPM) : ${estRPM.toFixed(1)}\n` +
+                    `Radius Outer: ${r_outer.toFixed(2)}\n` +
+                    `---------------------\n` +
+                    `Sync Target : '${sampleLetter ? sampleLetter.userData.name : '-'}'\n` +
+                    `Pos X/Z     : [${sampleLetter ? sampleLetter.position.x.toFixed(2) : 0}, ${sampleLetter ? sampleLetter.position.z.toFixed(2) : 0}]`;
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
